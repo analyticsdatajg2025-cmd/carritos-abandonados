@@ -1,0 +1,48 @@
+{
+  "correo": {
+    "servidor": "imap.gmail.com",
+    "puerto": 993,
+    "carpeta": "INBOX",
+    "usuario": "analytics.data.jg.2025@gmail.com",
+    "password": "",
+    "remitente": "Reportes Magento",
+    "asunto_contiene": "",
+    "adjunto_patron": "Carritos.*\\.(csv|txt|xlsx|zip)$",
+    "dias_atras": 1
+  },
+  "feed": {
+    "activo": true,
+    "urls": {
+      "lacuracao": "https://analyticsdatajg2025-cmd.github.io/repo-lacuracao/lacuracao/catalogo/feed.csv",
+      "efe": "https://analyticsdatajg2025-cmd.github.io/repo-efe/efe/catalogo/feed.csv"
+    },
+    "horas_cache": 12,
+    "timeout": 180
+  },
+  "marcas": {
+    "reglas": {
+      "LACURACAO": "lacuracao",
+      "LA CURACAO": "lacuracao",
+      "EFE": "efe"
+    },
+    "por_defecto": "otros"
+  },
+  "salida": {
+    "legible": false
+  },
+  "publicar": {
+    "activo": true,
+    "url": "",
+    "clave": ""
+  },
+  "ftp": {
+    "activo": false,
+    "servidor": "ftp.hablamas.pe",
+    "puerto": 21,
+    "tls": true,
+    "usuario": "test@hablamas.pe",
+    "password": "",
+    "carpeta": "/reportes",
+    "timeout": 120
+  }
+}

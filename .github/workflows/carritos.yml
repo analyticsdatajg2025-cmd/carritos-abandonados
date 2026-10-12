@@ -1,0 +1,103 @@
+# Carritos abandonados: todos los dias a las 8:00 de Lima lee el Gmail, arma el JSON y lo publica
+# en el Worker privado (URL con clave). Si una corrida falla, GitHub avisa por correo.
+#
+# Secretos del repo (Settings > Secrets and variables > Actions):
+#   GMAIL_PASSWORD          contrasena de aplicacion de analytics.data.jg.2025@gmail.com
+#   CLOUDFLARE_API_TOKEN    token «Edit Cloudflare Workers» de la cuenta empresa (+ permiso KV)
+#   CARRITOS_CLAVE_LECTURA  la clave de la URL (?key=...), la que se comparte con el equipo
+#   CARRITOS_CLAVE_SUBIDA   solo la usa este workflow para subir
+name: Carritos abandonados
+
+on:
+  schedule:
+    # GitHub no dispara en punto: 8:00, 9:00 y 10:00 de Lima. Las de respaldo no hacen nada
+    # si el reporte de hoy ya esta publicado.
+    - cron: '0 13 * * *'
+    - cron: '0 14 * * *'
+    - cron: '0 15 * * *'
+  push:
+    branches: [main]
+    paths: ['worker/**', '.github/workflows/carritos.yml']
+  workflow_dispatch:
+    inputs:
+      que:
+        description: 'Que correr'
+        type: choice
+        options: [reporte, worker, ambos]
+        default: reporte
+
+concurrency: carritos
+
+env:
+  CF_CUENTA: c7cec21e43332c971b3dc3f5bcd40c22
+  WORKER: carritos-abandonados
+  TZ: America/Lima
+
+jobs:
+  publicar-worker:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.que != 'reporte')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults: { run: { working-directory: worker } }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Buscar o crear el KV
+        env: { CF: '${{ secrets.CLOUDFLARE_API_TOKEN }}' }
+        run: |
+          api=https://api.cloudflare.com/client/v4/accounts/$CF_CUENTA/storage/kv/namespaces
+          id=$(curl -sf -H "Authorization: Bearer $CF" "$api?per_page=100" | jq -r '.result[] | select(.title=="carritos-abandonados") | .id')
+          if [ -z "$id" ]; then
+            id=$(curl -sf -X POST -H "Authorization: Bearer $CF" -H 'Content-Type: application/json' \
+                 -d '{"title":"carritos-abandonados"}' "$api" | jq -r '.result.id')
+            echo "KV creado"
+          fi
+          test -n "$id" && test "$id" != null
+          sed -i "s/KV_ID/$id/" wrangler.toml
+      - name: Publicar el Worker y sus claves
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          LECTURA: ${{ secrets.CARRITOS_CLAVE_LECTURA }}
+          SUBIDA: ${{ secrets.CARRITOS_CLAVE_SUBIDA }}
+        run: |
+          test -n "$LECTURA" && test -n "$SUBIDA"
+          npx --yes wrangler@4 deploy
+          printf '%s' "$LECTURA" | npx --yes wrangler@4 secret put LECTURA_CLAVE
+          printf '%s' "$SUBIDA"  | npx --yes wrangler@4 secret put SUBIDA_CLAVE
+
+  reporte:
+    needs: publicar-worker
+    if: >-
+      always() && needs.publicar-worker.result != 'failure' &&
+      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.que != 'worker'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: URL del Worker
+        id: url
+        env: { CF: '${{ secrets.CLOUDFLARE_API_TOKEN }}' }
+        run: |
+          sub=$(curl -sf -H "Authorization: Bearer $CF" \
+                https://api.cloudflare.com/client/v4/accounts/$CF_CUENTA/workers/subdomain | jq -r '.result.subdomain')
+          test -n "$sub" && test "$sub" != null
+          echo "url=https://$WORKER.$sub.workers.dev" >> "$GITHUB_OUTPUT"
+      - name: ¿Ya esta el de hoy?
+        id: hoy
+        if: github.event_name == 'schedule'
+        env: { CLAVE: '${{ secrets.CARRITOS_CLAVE_LECTURA }}' }
+        run: |
+          al_dia=$(curl -s -H "Authorization: Bearer $CLAVE" "${{ steps.url.outputs.url }}/estado.json" | jq -r '.al_dia // false')
+          echo "listo=$al_dia" >> "$GITHUB_OUTPUT"
+          [ "$al_dia" = true ] && echo "El reporte de hoy ya esta publicado; esta corrida de respaldo no hace nada." || true
+      - if: steps.hoy.outputs.listo != 'true'
+        uses: actions/setup-python@v5
+        with: { python-version: '3.12', cache: pip, cache-dependency-path: requirements.txt }
+      - if: steps.hoy.outputs.listo != 'true'
+        run: pip install -r requirements.txt
+      - name: Leer el correo, armar y publicar el JSON
+        if: steps.hoy.outputs.listo != 'true'
+        env:
+          GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
+          PUBLICAR_URL: ${{ steps.url.outputs.url }}
+          PUBLICAR_CLAVE: ${{ secrets.CARRITOS_CLAVE_SUBIDA }}
+        run: python reportes.py

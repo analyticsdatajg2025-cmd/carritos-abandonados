@@ -1,0 +1,10 @@
+name = "carritos-abandonados"
+main = "index.js"
+compatibility_date = "2026-09-01"
+account_id = "c7cec21e43332c971b3dc3f5bcd40c22" # cuenta empresa (analytics.data.jg.2025)
+workers_dev = true
+
+# El id lo completa el workflow (job «publicar-worker»): busca o crea el KV «carritos-abandonados».
+[[kv_namespaces]]
+binding = "CARRITOS"
+id = "KV_ID"
